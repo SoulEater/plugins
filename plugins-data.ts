@@ -142,7 +142,7 @@ export const pluginDataList: PluginData[] = [
   {
     "plugin": {
       "summary": "AI Buddy UI",
-      "version": "0.0.1",
+      "version": "0.1.0",
       "description": "fba AI Buddy 插件的前端实现",
       "author": "wu-clan",
       "tags": [
