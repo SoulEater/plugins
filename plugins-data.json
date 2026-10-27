@@ -40,6 +40,29 @@
     {
       "plugin": {
         "icon": "https://wu-clan.github.io/picx-images-hosting/logo/fba.svg",
+        "summary": "AI Buddy",
+        "version": "0.13.0",
+        "description": "为系统提供 Buddy 全量 AI 能力，由后端提供接口，前端后台管理，客户端在同一对话内切工作或编码",
+        "author": "wu-clan",
+        "tags": [
+          "agent",
+          "ai",
+          "mcp"
+        ],
+        "database": [
+          "mysql",
+          "postgresql"
+        ]
+      },
+      "git": {
+        "path": "plugins/ai_buddy",
+        "url": "https://github.com/fastapi-practices/ai_buddy.git",
+        "branch": "master"
+      }
+    },
+    {
+      "plugin": {
+        "icon": "https://wu-clan.github.io/picx-images-hosting/logo/fba.svg",
         "summary": "AI Buddy Group",
         "version": "0.0.1",
         "description": "用于管理 AI Buddy 资源分组及资源可见性",
