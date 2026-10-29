@@ -92,3 +92,9 @@
 [submodule "plugins/ai-buddy-group-ui"]
 	path = plugins/ai-buddy-group-ui
 	url = https://github.com/fastapi-practices/ai-buddy-group-ui.git
+[submodule "plugins/app_update"]
+	path = plugins/app_update
+	url = https://github.com/SoulEater/app_update.git
+[submodule "plugins/app_update_ui"]
+	path = plugins/app_update_ui
+	url = https://github.com/SoulEater/app_update_ui.git
