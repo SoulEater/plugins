@@ -1,16 +1,24 @@
 name: Validate Plugin TOML
 
 on:
-  pull_request_target:
+  pull_request:
     branches:
       - master
     paths:
       - 'plugins/**'
+      - 'constants.ts'
+      - 'validate.ts'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/validate-plugin-toml.yml'
 
 permissions:
   contents: read
-  issues: write
-  pull-requests: write
+
+concurrency:
+  group: validate-plugin-toml-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   validate:
@@ -22,34 +30,41 @@ jobs:
         with:
           submodules: recursive
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Get changed plugins
         id: changed
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          CHANGED_PLUGINS=$(git diff --name-only origin/${{ github.base_ref }}...${{ github.event.pull_request.head.sha }} | grep '^plugins/' | cut -d'/' -f2 | sort -u | tr '\n' ' ')
-          echo "plugins=$CHANGED_PLUGINS" >> $GITHUB_OUTPUT
-          echo "Changed plugins: $CHANGED_PLUGINS"
+          CHANGED_PLUGINS=$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}" | awk -F/ '/^plugins\// && NF >= 2 { print $2 }' | sort -u | tr '\n' ' ')
+          CHANGED_PLUGIN_COUNT=$(printf '%s' "$CHANGED_PLUGINS" | wc -w)
+          echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          if [ "$CHANGED_PLUGIN_COUNT" -eq 0 ]; then
+            echo "No plugins changed; validating all plugins"
+          fi
+          echo "plugins=$CHANGED_PLUGINS" >> "$GITHUB_OUTPUT"
+          echo "Changed plugin count: $CHANGED_PLUGIN_COUNT"
 
       - name: Setup Node.js
-        if: steps.changed.outputs.plugins != ''
+        if: steps.changed.outputs.has_changes == 'true'
         uses: actions/setup-node@v5
         with:
           node-version: '22'
 
       - name: Setup pnpm
-        if: steps.changed.outputs.plugins != ''
+        if: steps.changed.outputs.has_changes == 'true'
         uses: pnpm/action-setup@v5
         with:
           version: 10
 
       - name: Install dependencies
-        if: steps.changed.outputs.plugins != ''
-        run: pnpm install
+        if: steps.changed.outputs.has_changes == 'true'
+        run: pnpm install --frozen-lockfile
 
       - name: Validate plugin.toml files
         id: validate
-        if: steps.changed.outputs.plugins != ''
+        if: steps.changed.outputs.has_changes == 'true'
         continue-on-error: true
         env:
           VALIDATION_REPORT_PATH: validation-report.md
@@ -57,54 +72,37 @@ jobs:
           pnpm validate ${{ steps.changed.outputs.plugins }}
           echo "result=success" >> $GITHUB_OUTPUT
 
-      - name: Post validation comment
-        if: always() && steps.changed.outputs.plugins != ''
-        uses: actions/github-script@v7
+      - name: Prepare fallback report
+        if: always() && steps.changed.outputs.has_changes == 'true'
+        env:
+          VALIDATE_OUTCOME: ${{ steps.validate.outcome }}
+        run: |
+          if [ -f validation-report.md ]; then
+            exit 0
+          fi
+
+          if [ "$VALIDATE_OUTCOME" = "failure" ]; then
+            printf '%s\n' \
+              '## Plugin TOML Validation Report' \
+              '' \
+              '**Status**: ❌ Validation stopped before a report could be generated' \
+              '' \
+              'Review the validation step logs for the error' > validation-report.md
+          else
+            printf '%s\n' \
+              '## Plugin TOML Validation Report' \
+              '' \
+              '**Status**: ✅ Validation completed' > validation-report.md
+          fi
+
+      - name: Upload validation report
+        if: always() && steps.changed.outputs.has_changes == 'true'
+        uses: actions/upload-artifact@v7
         with:
-          script: |
-            const fs = require('fs');
-            const marker = '<!-- plugin-toml-validation -->';
-
-            let body;
-            const reportPath = 'validation-report.md';
-            if (fs.existsSync(reportPath)) {
-              body = marker + '\n' + fs.readFileSync(reportPath, 'utf8');
-            } else {
-              body = marker + '\n## Plugin TOML Validation Report\n\n> No validation report generated.';
-            }
-
-            try {
-              const { data: comments } = await github.rest.issues.listComments({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-              });
-
-              const existing = comments.find(c => c.body && c.body.includes(marker));
-
-              if (existing) {
-                await github.rest.issues.updateComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  comment_id: existing.id,
-                  body,
-                });
-              } else {
-                await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: context.issue.number,
-                  body,
-                });
-              }
-            } catch (error) {
-              if (error.status === 403) {
-                core.warning(`Skipping PR comment because the workflow token cannot write comments: ${error.message}`);
-                return;
-              }
-
-              throw error;
-            }
+          name: plugin-toml-validation
+          path: validation-report.md
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Fail if validation failed
         if: steps.validate.outcome == 'failure'
