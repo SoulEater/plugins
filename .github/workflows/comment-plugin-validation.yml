@@ -1,0 +1,133 @@
+name: Comment Plugin Validation
+
+on:
+  workflow_run:
+    workflows:
+      - Validate Plugin TOML
+    types:
+      - completed
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  comment:
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download validation report
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: plugin-toml-validation
+          path: validation
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Post validation comment
+        uses: actions/github-script@v9
+        env:
+          WORKFLOW_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            const escapeMarkdownLinkText = value => value
+              .replace(/\\/g, '\\\\')
+              .replace(/\[/g, '\\[')
+              .replace(/\]/g, '\\]')
+              .replace(/</g, '&lt;')
+              .replace(/>/g, '&gt;')
+              .replace(/\n/g, ' ');
+
+            const marker = '<!-- plugin-toml-validation -->';
+            const reportPath = path.join(process.env.GITHUB_WORKSPACE, 'validation', 'validation-report.md');
+
+            let pullRequestNumber = context.payload.workflow_run.pull_requests?.[0]?.number;
+            const headOwner = context.payload.workflow_run.head_repository?.owner?.login;
+            const headBranch = context.payload.workflow_run.head_branch;
+
+            if (!pullRequestNumber && headOwner && headBranch) {
+              const { data: pullRequests } = await github.rest.pulls.list({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: 'open',
+                head: `${headOwner}:${headBranch}`,
+                per_page: 100,
+              });
+              pullRequestNumber = pullRequests.find(
+                pullRequest => pullRequest.head.sha === context.payload.workflow_run.head_sha
+              )?.number;
+            }
+
+            if (!pullRequestNumber) {
+              core.warning('No pull request is attached to this workflow run');
+              return;
+            }
+
+            const workflowUrl = context.payload.workflow_run.html_url;
+            const status = process.env.WORKFLOW_CONCLUSION === 'success'
+              ? '✅ Passed'
+              : process.env.WORKFLOW_CONCLUSION === 'failure'
+                ? '❌ Failed'
+                : `⚠️ ${process.env.WORKFLOW_CONCLUSION}`;
+
+            let body;
+            if (fs.existsSync(reportPath)) {
+              const report = fs.readFileSync(reportPath, 'utf8')
+                .replace(/\r\n?/g, '\n')
+                .trim();
+              const maxReportLength = 60000;
+              const truncated = report.length > maxReportLength;
+              const displayedReport = truncated
+                ? `${report.slice(0, maxReportLength)}\n\n> Report truncated`
+                : report;
+              const backtickRuns = displayedReport.match(/`+/g) ?? [];
+              const fence = '`'.repeat(Math.max(3, ...backtickRuns.map(run => run.length)) + 1);
+              body = marker + '\n' +
+                `## Plugin TOML Validation Report\n\n**Status**: ${status}\n\n` +
+                '<details>\n<summary>Validation details</summary>\n\n' +
+                `${fence}text\n${displayedReport}\n${fence}\n\n</details>\n\n` +
+                `[View workflow logs](${escapeMarkdownLinkText(workflowUrl)})`;
+            } else if (process.env.WORKFLOW_CONCLUSION === 'failure') {
+              body = marker + '\n## Plugin TOML Validation Report\n\n' +
+                `**Status**: ${status}\n\n> Validation workflow failed before generating a report\n\n` +
+                `[View workflow logs](${escapeMarkdownLinkText(workflowUrl)})`;
+            } else {
+              body = marker + '\n## Plugin TOML Validation Report\n\n' +
+                `**Status**: ${status}\n\n> No validation report was available. See the workflow logs for details.\n\n` +
+                `[View workflow logs](${escapeMarkdownLinkText(workflowUrl)})`;
+            }
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pullRequestNumber,
+              per_page: 100,
+            });
+            const existing = comments.find(comment =>
+              comment.user?.login === 'github-actions[bot]' &&
+              comment.body?.includes(marker)
+            );
+            const commentBody = body.slice(0, 65536);
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: commentBody,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pullRequestNumber,
+                body: commentBody,
+              });
+            }
