@@ -171,6 +171,42 @@
     },
     {
       "plugin": {
+        "summary": "应用管理",
+        "version": "0.2.0",
+        "description": "管理桌面应用版本、更新渠道和 Electron 更新产物",
+        "author": "as-fba",
+        "tags": [
+          "storage"
+        ],
+        "database": [
+          "mysql",
+          "postgresql"
+        ]
+      },
+      "git": {
+        "path": "plugins/app_update",
+        "url": "https://github.com/SoulEater/app_update.git",
+        "branch": "master"
+      }
+    },
+    {
+      "plugin": {
+        "summary": "应用更新管理前端 UI 插件（web-antdv-next）",
+        "version": "0.2.0",
+        "description": "管理桌面应用版本、更新渠道和 Electron 更新产物",
+        "author": "as-fba",
+        "tags": [
+          "storage"
+        ]
+      },
+      "git": {
+        "path": "plugins/app_update_ui",
+        "url": "https://github.com/SoulEater/app_update_ui.git",
+        "branch": "master"
+      }
+    },
+    {
+      "plugin": {
         "summary": "Casbin RBAC",
         "version": "0.0.3",
         "description": "基于 Casbin 实现的 RBAC 访问控制",
